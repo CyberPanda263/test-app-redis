@@ -48,7 +48,7 @@ export default function App() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.header}>G.E.N.A. test platform 🚀 333</h1>
-        <p style={styles.subtitle}>Тестування з'єднання з базою даних SQL Server</p>
+        <p style={styles.subtitle}>Тестування з'єднання з базою даних Redis</p>
 
         <div style={styles.buttonGroup}>
           <button 
