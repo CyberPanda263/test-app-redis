@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-app-sql-server
+  annotations: { "argocd.argoproj.io/sync-wave": "-5" }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+  namespace: test-app-sql-server
+  annotations: { "argocd.argoproj.io/sync-wave": "-2" }
+stringData:
+  DB_USER: "sa"
+  DB_PASSWORD: "SuperSecretPassword123!"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sql-server-pvc
+  namespace: test-app-sql-server
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sql-server-deployment
+  namespace: test-app-sql-server
+spec:
+  selector: { matchLabels: { app: sql-server } }
+  template:
+    metadata: { labels: { app: sql-server } }
+    spec:
+      containers:
+      - name: sql-server
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+        - name: ACCEPT_EULA
+          value: "Y"
+        - name: MSSQL_SA_PASSWORD
+          valueFrom: { secretKeyRef: { name: db-secret, key: DB_PASSWORD } }
+        ports: [{ containerPort: 1433 }]
+        volumeMounts: [{ name: data, mountPath: /var/opt/mssql }]
+      volumes:
+      - name: data
+        persistentVolumeClaim: { claimName: sql-server-pvc }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sql-server-service
+  namespace: test-app-sql-server
+spec:
+  selector: { app: sql-server }
+  ports: [{ port: 1433, targetPort: 1433 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: test-app-sql-server
+spec:
+  selector: { matchLabels: { app: backend } }
+  template:
+    metadata: { labels: { app: backend } }
+    spec:
+      containers:
+      - name: backend
+        image: registry.registry.svc.cluster.local:5000/test-app-sql-server:build-run-ef495
+        ports: [{ containerPort: 3001 }]
+        env:
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: db-secret, key: DB_USER } }
+        - name: DB_PASS
+          valueFrom: { secretKeyRef: { name: db-secret, key: DB_PASSWORD } }
+        - name: DB_URI
+          # Підключення до дефолтної бази master, оскільки SQL Server не створює кастомну БД через змінні середовища
+          value: "mssql://$(DB_USER):$(DB_PASS)@sql-server-service:1433/master"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: test-app-sql-server
+spec:
+  selector: { app: backend }
+  ports: [{ port: 3001, targetPort: 3001 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: test-app-sql-server
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: test-app-sql-server.barbariska.fun
+    http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: backend-service, port: { number: 3001 } } } }] }
